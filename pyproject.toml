@@ -1,6 +1,6 @@
 [project]
 name = "aiopjlink"
-version = "1.0.4"
+version = "1.0.5"
 description = "Asyncio PJLink library (Class 1 and Class 2)"
 readme = "README.md"
 keywords = ["projector", "pjlink", "asyncio"]
