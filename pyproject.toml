@@ -2,12 +2,27 @@
 name = "aiopjlink"
 version = "1.0.3"
 description = "Asyncio PJLink library (Class 1 and Class 2)"
+readme = "README.md"
+keywords = ["projector", "pjlink", "asyncio"]
 authors = [
     {name = "HE Inventions LTD", email = "support@heinventions.com"},
 ]
 dependencies = []
 requires-python = ">=3.9"
-license = {text = "None"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Framework :: AsyncIO",
+]
+license = {text = "MIT"}
+
+[project.urls]
+"Homepage" = "https://pypi.org/project/aiopjlink/"
+"Repository" = "https://github.com/HEInventions/aiopjlink"
+"Bug Tracker" = "https://github.com/HEInventions/aiopjlink/issues"
+
+
 [project.optional-dependencies]
 
 [build-system]
