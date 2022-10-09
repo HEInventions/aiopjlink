@@ -1,0 +1,37 @@
+[project]
+name = "aiopjlink"
+version = "1.0.3"
+description = "Asyncio PJLink library (Class 1 and Class 2)"
+authors = [
+    {name = "HE Inventions LTD", email = "support@heinventions.com"},
+]
+dependencies = []
+requires-python = ">=3.9"
+license = {text = "None"}
+[project.optional-dependencies]
+
+[build-system]
+requires = ["pdm-pep517>=1.0.0"]
+build-backend = "pdm.pep517.api"
+
+[tool]
+[tool.pdm]
+[tool.pdm.dev-dependencies]
+dev = [
+    "flake8>=5.0.4",
+    "coverage>=6.4.3",
+]
+
+[tool.pdm.scripts]
+lint = "python -m flake8 aiopjlink test"
+test = "python -m unittest discover -v"
+test_d.cmd = "python -m unittest discover -v"
+test_d.env = {AIOPJLINK_PRINT_DEBUG_COMMS = "True"}
+
+coverage = "coverage run -m unittest discover -v"
+coverage_report = "coverage report"
+coverage_html = "coverage html"
+
+p_on = "python -m aiopjlink.cli 192.168.100.120 on"
+p_off = "python -m aiopjlink.cli 192.168.100.120 off"
+p_errors = "python -m aiopjlink.cli 192.168.100.120 errors"
