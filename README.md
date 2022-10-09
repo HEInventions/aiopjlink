@@ -31,6 +31,19 @@ PJLink consists of [Class 1](https://pjlink.jbmia.or.jp/english/data/5-1_PJLink_
 * Class 1 is the most common type of PJLink, and is used for basic commands such as power on/off, input selection, and adjusting volume.
 * Class 2 is an extended version of the protocol that supports additional commands such as opening and closing the projector's lens cover, and is typically used by more sophisticated devices.
 
+## What is aiopjlink?
+
+A Python library that uses [asyncio](https://docs.python.org/3/library/asyncio.html) to talk to one or more projectors connected to a network using the PJLink protocol.
+
+It has these advantages:
+
+* ✅ Clean modern asyncio API
+* ✅ High level API abstraction (eg. `lamp.hours`)
+* ✅ Pure Python 3 implementation (no dependencies)
+* ✅ Full suite of test cases
+* ✅ Context managers for keeping track of connections and resources 
+* ✅ High quality error handling
+
 
 ## Usage
 
