@@ -4,19 +4,12 @@
 
 A modern Python asyncio PJLink library (Class I and Class II).
 
-```
-         d8b                     d8b 888 d8b          888      
-         Y8P                     Y8P 888 Y8P          888      
-                                     888              888      
- 8888b.  888  .d88b.   88888b.  8888 888 888 88888b.  888  888 
-    "88b 888 d88""88b  888 "88b "888 888 888 888 "88b 888 .88P 
-.d888888 888 888  888  888  888  888 888 888 888  888 888888K  
-888  888 888 Y88..88P  888 d88P  888 888 888 888  888 888 "88b 
-"Y888888 888  "Y88P"   88888P"   888 888 888 888  888 888  888 
-                       888       888                           
-                       888      d88P                           
-                       888    888P"                            
-```
+[![PyPI](https://img.shields.io/pypi/v/aiopjlink?logo=python&logoColor=%23cccccc)](https://pypi.org/project/aiopjlink)
+![PyPI - License](https://img.shields.io/pypi/l/aiopjlink)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/aiopjlink)
+
+![PyPI - Downloads](https://img.shields.io/pypi/dm/aiopjlink)
+![GitHub repo size](https://img.shields.io/github/repo-size/HEInventions/aiopjlink)
 
 </div>
 
