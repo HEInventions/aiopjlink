@@ -133,6 +133,9 @@ class PJLink:
         raise NotImplementedError('class 2 method not supported')
 
     async def __aenter__(self):
+        return await self.connect()
+
+    async def connect(self):
         """ Open a connection to the projector and authenticate. """
         try:
             self._reader, self._writer = await asyncio.wait_for(
@@ -193,6 +196,9 @@ class PJLink:
         return self
 
     async def __aexit__(self, exc_type, exc_value, exc_tb):
+        await self.disconnect()
+
+    async def disconnect(self):
         """ Close an open connection to the projector. """
         try:
             self._writer.close()
