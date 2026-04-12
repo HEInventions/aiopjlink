@@ -155,7 +155,7 @@ class PJLink:
         # data = await self._raw_read(n_bytes=9)
         try:
             data = await self._read_next()
-        except asyncio.exceptions.TimeoutError:
+        except PJLinkNoConnection:
             raise PJLinkProtocolError('projector did not send a welcome message')
         if len(data) < 9:
             raise PJLinkProtocolError('unexpected opening header message from projector - too short')
@@ -213,6 +213,8 @@ class PJLink:
             raw = await asyncio.wait_for(self._reader.readuntil(b'\r'), self._timeout)
         except asyncio.IncompleteReadError as err:
             raise PJLinkConnectionClosed('projector closed the connection') from err
+        except TimeoutError as err:
+            raise PJLinkNoConnection('projector did not respond in time') from err
         return raw.decode(self._encoding)
 
     async def transmit(self, command, param, pjclass: PJClass):

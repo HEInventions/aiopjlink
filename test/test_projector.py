@@ -59,6 +59,9 @@ class PJLinkServerProtocol(asyncio.Protocol):
         # Buffer fore incoming messages until \r.
         self._recv_buffer = b''
 
+        # Simulates a non-responsive projector by ignoring client messages.
+        self.ignore_requests = False
+
     def _write(self, data):
         """ Send data to the client. """
         if self.debug:
@@ -84,6 +87,9 @@ class PJLinkServerProtocol(asyncio.Protocol):
         """ Called when the projector recieves data from the client. """
         if self.debug:
             print("PJLinkServerProtocol RECV:", data)
+
+        if self.ignore_requests:
+            return
 
         # Buffer up writes until we get a terminator.
         self._recv_buffer += data
@@ -564,6 +570,16 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
             expect_pjclass='1')
         self.assertEqual(command, 'INF2')
         self.assertEqual(param, '')
+
+    async def test_connection_drop_during_transmit(self):
+        """ Test that if the TCP connection dropped, PJLinkNoConnection is raised due to timeout. """
+        async with mock_tcp_pjlink() as server:
+            server.open_and_send(b'PJLINK 0\r')
+            # Use a very short timeout to simulate timeout behavior
+            async with aiopjlink.PJLink(address='127.0.0.1', password=None, timeout=0.1) as link:
+                server.ignore_requests = True
+                with self.assertRaises(aiopjlink.PJLinkNoConnection):
+                    await link.power.get()
 
 
 class PowerGroup(unittest.IsolatedAsyncioTestCase):
