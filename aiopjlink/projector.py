@@ -234,6 +234,9 @@ class PJLink:
         Returns:
             str: The response to the issued command.
         """
+        if not self.is_connected:
+            await self.connect()
+
         # Generate the command string.
         cstring = self._format_command(command, param, pjclass)
 
@@ -250,6 +253,10 @@ class PJLink:
         # Parse the response.
         _, param = PJLink._parse_response(response, expect_command=command, expect_pjclass=pjclass)
         return param
+
+    @property
+    def is_connected(self):
+        return self._writer is not None and not self._writer.is_closing()
 
     @staticmethod
     def _format_command(command, param, pjclass: PJClass):
