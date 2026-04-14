@@ -213,7 +213,7 @@ class PJLink:
             raw = await asyncio.wait_for(self._reader.readuntil(b'\r'), self._timeout)
         except asyncio.IncompleteReadError as err:
             raise PJLinkConnectionClosed('projector closed the connection') from err
-        except TimeoutError as err:
+        except asyncio.exceptions.TimeoutError as err:
             raise PJLinkNoConnection('projector did not respond in time') from err
         return raw.decode(self._encoding)
 
@@ -256,6 +256,7 @@ class PJLink:
 
     @property
     def is_connected(self):
+        """ True if the connection is active and not in a closing state. """
         return self._writer is not None and not self._writer.is_closing()
 
     @staticmethod
