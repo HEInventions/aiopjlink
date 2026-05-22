@@ -586,21 +586,21 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
                 server.ignore_requests = True
                 with self.assertRaises(aiopjlink.PJLinkNoConnection):
                     await link.power.get()
-                    
+
     async def test_transmit_auto_reconnect(self):
         """ Verify transmit() triggers connect() if the client is not yet connected. """
         async with mock_tcp_pjlink() as server:
             server.open_and_send(b'PJLINK 0\r')
-            
+
             # Initialize the client without 'async with' so it isn't connected yet
             client = aiopjlink.PJLink(address='127.0.0.1')
-            
+
             try:
                 # We wrap the real connect method to verify it gets called
                 with patch.object(aiopjlink.PJLink, 'connect', wraps=client.connect) as mock_connect:
                     async with server.when(b'%1POWR ?\r', respond_with=b'%1POWR=0\r'):
                         await client.transmit('POWR', '?', pjclass=aiopjlink.PJClass.ONE)
-                        
+
                         # Verify auto-connection happened
                         mock_connect.assert_called_once()
             finally:
@@ -610,14 +610,14 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
         """ Verify transmit() does NOT call connect() if the connection is already active. """
         async with mock_tcp_pjlink() as server:
             server.open_and_send(b'PJLINK 0\r')
-            
+
             # Use the context manager to establish the initial connection
             async with aiopjlink.PJLink(address='127.0.0.1') as client:
                 # Wrap connect to see if it's called again
                 with patch.object(aiopjlink.PJLink, 'connect', wraps=client.connect) as mock_connect:
                     async with server.when(b'%1POWR ?\r', respond_with=b'%1POWR=0\r'):
                         await client.transmit('POWR', '?', pjclass=aiopjlink.PJClass.ONE)
-                        
+
                         # Verify connect was NOT called again during transmit
                         mock_connect.assert_not_called()
 
