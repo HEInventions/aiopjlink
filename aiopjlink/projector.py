@@ -252,7 +252,7 @@ class PJLink:
         Returns:
             str: The response to the issued command.
         """
-        # Only one comman/reconnection at a time.
+        # Only one command/reconnection at a time.
         async with self._tx_lock:
 
             # Guard against lazy/unintended connections
