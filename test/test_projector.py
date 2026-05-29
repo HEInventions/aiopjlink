@@ -3,6 +3,7 @@ import hashlib
 import unittest
 import platform
 import contextlib
+from unittest.mock import patch
 
 import aiopjlink.projector as aiopjlink
 
@@ -59,11 +60,17 @@ class PJLinkServerProtocol(asyncio.Protocol):
         # Buffer fore incoming messages until \r.
         self._recv_buffer = b''
 
+        # Simulates a non-responsive projector by ignoring client messages.
+        self.ignore_requests = False
+
+        self.transport = None
+
     def _write(self, data):
         """ Send data to the client. """
         if self.debug:
             print("PJLinkServerProtocol SEND:", data)
-        self.transport.write(data)
+        if self.transport:
+            self.transport.write(data)
 
     def connection_made(self, transport):
         """ Called when a connection is first made to this projector. """
@@ -76,14 +83,17 @@ class PJLinkServerProtocol(asyncio.Protocol):
 
     def connection_lost(self, exc):
         """ Called when the connection is lost or closed. """
+        self.transport = None
         if self.debug:
-            peer = self.transport.get_extra_info('peername')
-            print("PJLinkServerProtocol CONNECTION_LOST:", peer)
+            print("PJLinkServerProtocol CONNECTION_LOST")
 
     def data_received(self, data):
         """ Called when the projector recieves data from the client. """
         if self.debug:
             print("PJLinkServerProtocol RECV:", data)
+
+        if self.ignore_requests:
+            return
 
         # Buffer up writes until we get a terminator.
         self._recv_buffer += data
@@ -104,7 +114,8 @@ class PJLinkServerProtocol(asyncio.Protocol):
                 expected.recv_buffer_contents = self._recv_buffer[:]
                 self.loop.call_soon_threadsafe(expected.set)
                 self._recv_buffer = b''
-                self.transport.close()
+                if self.transport:
+                    self.transport.close()
 
             # If the client sent an _expected_ message, flag it as correct,
             # save the buffer contents, and then reply with the expected
@@ -112,7 +123,8 @@ class PJLinkServerProtocol(asyncio.Protocol):
             else:
                 expected.recv_buffer_contents = self._recv_buffer[:]
                 self.loop.call_soon_threadsafe(expected.set)
-                self.transport.write(expected.respond_with)
+                if self.transport:
+                    self.transport.write(expected.respond_with)
                 self._recv_buffer = b''
 
     def open_and_send(self, message):
@@ -199,6 +211,10 @@ async def mock_tcp_pjlink(host='127.0.0.1', port=4352, password=None):
         yield protocol
     finally:
         server_task.cancel()
+        server.close()
+        await server.wait_closed()
+        if protocol.transport:
+            protocol.transport.close()
 
 
 @contextlib.asynccontextmanager
@@ -564,6 +580,74 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
             expect_pjclass='1')
         self.assertEqual(command, 'INF2')
         self.assertEqual(param, '')
+
+
+class ConnectionTests(unittest.IsolatedAsyncioTestCase):
+    """ PJLink connection managment behaves as expected.
+    """
+
+    async def test_connection_drop_during_transmit(self):
+        """ Test that if the TCP connection dropped, PJLinkNoConnection is raised due to timeout. """
+        async with mock_tcp_pjlink() as server:
+            server.open_and_send(b'PJLINK 0\r')
+            # Use a very short timeout to simulate timeout behavior
+            async with aiopjlink.PJLink(address='127.0.0.1', password=None, timeout=0.1) as link:
+                server.ignore_requests = True
+                with self.assertRaises(aiopjlink.PJLinkNoConnection):
+                    await link.power.get()
+
+    async def test_transmit_without_explicit_connect_raises(self):
+        """ Verify transmit() blocks lazy connections if connect() was never explicitly called. """
+        # Initialize the client without 'async with' or 'await client.connect()'
+        client = aiopjlink.PJLink(address='127.0.0.1')
+
+        try:
+            with self.assertRaises(aiopjlink.PJLinkNoConnection) as err:
+                await client.transmit('POWR', '?', pjclass=aiopjlink.PJClass.ONE)
+            self.assertIn("explicitly connect", str(err.exception))
+        finally:
+            await client.disconnect()
+
+    async def test_transmit_auto_reconnect_after_drop(self):
+        """ Verify transmit() triggers connect() if the connection was previously active but dropped. """
+        async with mock_tcp_pjlink() as server:
+            server.open_and_send(b'PJLINK 0\r')
+
+            client = aiopjlink.PJLink(address='127.0.0.1')
+
+            try:
+                # 1. Explicitly connect the first time
+                await client.connect()
+                self.assertTrue(client.is_connected)
+
+                # 2. Simulate a network drop by closing the transport/writer manually
+                client._writer.close()
+                self.assertFalse(client.is_connected)
+
+                # 3. Transmit a command, which should trigger a reconnect
+                with patch.object(aiopjlink.PJLink, 'connect', wraps=client.connect) as mock_connect:
+                    async with server.when(b'%1POWR ?\r', respond_with=b'%1POWR=0\r'):
+                        await client.transmit('POWR', '?', pjclass=aiopjlink.PJClass.ONE)
+
+                        # Verify the recovery auto-connection happened
+                        mock_connect.assert_called_once()
+            finally:
+                await client.disconnect()
+
+    async def test_transmit_persists_connection(self):
+        """ Verify transmit() does NOT call connect() if the connection is already active. """
+        async with mock_tcp_pjlink() as server:
+            server.open_and_send(b'PJLINK 0\r')
+
+            # Use the context manager to establish the initial connection
+            async with aiopjlink.PJLink(address='127.0.0.1') as client:
+                # Wrap connect to see if it's called again
+                with patch.object(aiopjlink.PJLink, 'connect', wraps=client.connect) as mock_connect:
+                    async with server.when(b'%1POWR ?\r', respond_with=b'%1POWR=0\r'):
+                        await client.transmit('POWR', '?', pjclass=aiopjlink.PJClass.ONE)
+
+                        # Verify connect was NOT called again during transmit
+                        mock_connect.assert_not_called()
 
 
 class PowerGroup(unittest.IsolatedAsyncioTestCase):
