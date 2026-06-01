@@ -109,6 +109,7 @@ class PJLink:
     C2 = PJClass.TWO
 
     def __init__(self, address, port=4352, password=None, timeout=4, encoding='utf-8'):
+        self._initialized = False
         self._tx_lock = asyncio.Lock()
         self._reader = None
         self._writer = None
@@ -138,6 +139,10 @@ class PJLink:
 
     async def connect(self):
         """ Open a connection to the projector and authenticate. """
+
+        # Clean up any existing connection before trying to connect again.
+        await self._close_socket()
+
         try:
             self._reader, self._writer = await asyncio.wait_for(
                 asyncio.open_connection(self._address, self._port),
@@ -168,6 +173,7 @@ class PJLink:
 
             # Connection requires no auth: `PJLINK 0\r`.
             if auth_enabled == '0':
+                self._initialized = True
                 return self
 
             # Connection requires auth: `PJLINK 1 <token>`.
@@ -195,15 +201,13 @@ class PJLink:
             if response.upper() == 'PJLINK ERRA\r':
                 raise PJLinkPassword('authentication failed')
             self._parse_response(response, expect_command='POWR', expect_pjclass=PJClass.ONE)
+            self._initialized = True
             return self
 
         except Exception:
             # If the connection fails during the handshake, __aexit__ will not be called.
             # Clean up immediately to avoid leaking the socket and throwing resource warnings.
-            if self._writer is not None:
-                self._writer.close()
-            self._writer = None
-            self._reader = None
+            await self._close_socket()
 
             # Re-raise the issue so it is not lost.
             raise
@@ -213,6 +217,11 @@ class PJLink:
 
     async def disconnect(self):
         """ Close an open connection to the projector. """
+        await self._close_socket()
+        self._initialized = False
+
+    async def _close_socket(self):
+        """ Internal helper to safely close the streams without changing initialization state. """
         try:
             if self._writer is not None:
                 self._writer.close()
@@ -254,31 +263,37 @@ class PJLink:
         """
         # Only one command/reconnection at a time.
         async with self._tx_lock:
+            try:
+                # Guard against lazy/unintended connections
+                if not self._initialized:
+                    raise PJLinkNoConnection(
+                        "You must explicitly connect() or use the async context manager before transmitting."
+                        )
 
-            # Guard against lazy/unintended connections
-            if self._writer is None:
-                raise PJLinkNoConnection("You must explicitly connect() or use the async context manager before transmitting.")
+                # Try to reconnect if the socket dropped.
+                if not self.is_connected:
+                    await self.connect()
 
-            # Try to reconnect if the socket dropped.
-            if not self.is_connected:
-                await self.connect()
+                # Generate the command string.
+                cstring = self._format_command(command, param, pjclass)
 
-            # Generate the command string.
-            cstring = self._format_command(command, param, pjclass)
+                # Send the command string.
+                cbytes = bytearray(cstring, self._encoding)
+                if PRINT_DEBUG_COMMS:
+                    print("🚢", cbytes)
+                self._writer.write(cbytes)
+                await self._writer.drain()
 
-            # Send the command string.
-            cbytes = bytearray(cstring, self._encoding)
-            if PRINT_DEBUG_COMMS:
-                print("🚢", cbytes)
-            self._writer.write(cbytes)
-            await self._writer.drain()
+                # Get the response.
+                response = await self._read_next()
 
-            # Get the response.
-            response = await self._read_next()
+                # Parse the response.
+                _, param = PJLink._parse_response(response, expect_command=command, expect_pjclass=pjclass)
+                return param
 
-            # Parse the response.
-            _, param = PJLink._parse_response(response, expect_command=command, expect_pjclass=pjclass)
-            return param
+            except Exception:
+                await self._close_socket()
+                raise
 
     @property
     def is_connected(self):
