@@ -40,7 +40,7 @@ It has these advantages:
 
 ## Usage
 
-Each "connection" to a projector is managed through a `PJLink` context manager.  Once this is connected, you access the different functions through a high level API (e.g. `conn.power.turn_off()`, `conn.lamps.hours()`, `conn.errors.query()`, etc).
+Each "connection" to a projector can be managed through a `PJLink` context manager. Once this is connected, you access the different functions through a high level API (e.g. `conn.power.turn_off()`, `conn.lamps.hours()`, `conn.errors.query()`, etc).
 
 For example, create a `PJLink` connection to the projector and issue commands:
 
@@ -58,6 +58,16 @@ async with PJLink(address="192.168.1.120", password="secretpassword") as link:
     await asyncio.sleep(5)
     await link.power.turn_off()
 ```
+
+Alternatively, you can create a `PJLink` connection and manage it manually. But remember to call `disconnect` when you're done!
+
+```python
+link = PJLink(address="192.168.1.120", password="secretpassword")
+await link.connect()
+# ... use the link ...
+await link.disconnect()
+```
+
 
 ## Development
 

@@ -109,6 +109,8 @@ class PJLink:
     C2 = PJClass.TWO
 
     def __init__(self, address, port=4352, password=None, timeout=4, encoding='utf-8'):
+        self._initialized = False
+        self._tx_lock = asyncio.Lock()
         self._reader = None
         self._writer = None
         self._address = address
@@ -133,7 +135,14 @@ class PJLink:
         raise NotImplementedError('class 2 method not supported')
 
     async def __aenter__(self):
+        return await self.connect()
+
+    async def connect(self):
         """ Open a connection to the projector and authenticate. """
+
+        # Clean up any existing connection before trying to connect again.
+        await self._close_socket()
+
         try:
             self._reader, self._writer = await asyncio.wait_for(
                 asyncio.open_connection(self._address, self._port),
@@ -144,58 +153,82 @@ class PJLink:
         except OSError as err:
             raise PJLinkNoConnection(f"os timeout - {str(err)}")
 
-        # An authentication procedure is executed once after each establishment of TCP/IP connection.
-        # The authentication procedure involves a password verification process.
-        # See https://pjlink.jbmia.or.jp/english/data_cl2/PJLink_5-1.pdf SECTION 5
-
-        # Projector sends first message to identify itself as PJLINK.
-        # data = await self._raw_read(n_bytes=9)
         try:
-            data = await self._read_next()
-        except asyncio.exceptions.TimeoutError:
-            raise PJLinkProtocolError('projector did not send a welcome message')
-        if len(data) < 9:
-            raise PJLinkProtocolError('unexpected opening header message from projector - too short')
+            # An authentication procedure is executed once after each establishment of TCP/IP connection.
+            # The authentication procedure involves a password verification process.
+            # See https://pjlink.jbmia.or.jp/english/data_cl2/PJLink_5-1.pdf SECTION 5
 
-        auth_header, auth_enabled, auth_close = data[:7], data[7], data[8]
-        if auth_header.upper() != 'PJLINK ':
-            raise PJLinkProtocolError('unexpected opening header message from projector - not PJLink')
+            # Projector sends first message to identify itself as PJLINK.
+            try:
+                data = await self._read_next()
+            except PJLinkNoConnection:
+                raise PJLinkProtocolError('projector did not send a welcome message')
 
-        # Connection requires no auth: `PJLINK 0\r`.
-        if auth_enabled == '0':
+            if len(data) < 9:
+                raise PJLinkProtocolError('unexpected opening header message from projector - too short')
+
+            auth_header, auth_enabled, auth_close = data[:7], data[7], data[8]
+            if auth_header.upper() != 'PJLINK ':
+                raise PJLinkProtocolError('unexpected opening header message from projector - not PJLink')
+
+            # Connection requires no auth: `PJLINK 0\r`.
+            if auth_enabled == '0':
+                self._initialized = True
+                return self
+
+            # Connection requires auth: `PJLINK 1 <token>`.
+            if auth_enabled != '1' and auth_close != ' ':
+                raise PJLinkProtocolError('unexpected opening security message from projector - unrecognised auth method')
+
+            # Check we have a password specified.
+            if self._password is None:
+                raise PJLinkPassword('password required')
+
+            # Read the random number used to salt the password (excluding the terminating `\r`).
+            token = data[9:-1]
+            passcode = (token + self._password).encode('utf-8')
+            passcode_md5 = hashlib.md5(passcode).hexdigest()
+
+            # The PJLINK authentication procedure requires the password and the first command to be
+            # transmitted together.  We send a power status request for simplicity.
+            self._writer.write(bytearray(passcode_md5, encoding=self._encoding))
+            self._writer.write(b'%1POWR ?\r')
+            await self._writer.drain()
+
+            # Read the first few bytes of the response - check for failed auth.
+            # ERRA represents ERR or authorization.
+            response = await self._read_next()
+            if response.upper() == 'PJLINK ERRA\r':
+                raise PJLinkPassword('authentication failed')
+            self._parse_response(response, expect_command='POWR', expect_pjclass=PJClass.ONE)
+            self._initialized = True
             return self
 
-        # Connection requires auth: `PJLINK 1 <token>`.
-        if auth_enabled != '1' and auth_close != ' ':
-            raise PJLinkProtocolError('unexpected opening security message from projector - unrecognised auth method')
+        except Exception:
+            # If the connection fails during the handshake, __aexit__ will not be called.
+            # Clean up immediately to avoid leaking the socket and throwing resource warnings.
+            await self._close_socket()
 
-        # Check we have a password specified.
-        if self._password is None:
-            raise PJLinkPassword('password required')
-
-        # Read the random number used to salt the password (excluding the terminating `\r`).
-        token = data[9:-1]
-        passcode = (token + self._password).encode('utf-8')
-        passcode_md5 = hashlib.md5(passcode).hexdigest()
-
-        # The PJLINK authentication procedure requires the password and the first command to be
-        # transmitted together.  We send a power status request for simplicity.
-        self._writer.write(bytearray(passcode_md5, encoding=self._encoding))
-        self._writer.write(b'%1POWR ?\r')
-        await self._writer.drain()
-
-        # Read the first few bytes of the response - check for failed auth.
-        # ERRA represents ERR or authorization.
-        response = await self._read_next()
-        if response.upper() == 'PJLINK ERRA\r':
-            raise PJLinkPassword('authentication failed')
-        self._parse_response(response, expect_command='POWR', expect_pjclass=PJClass.ONE)
-        return self
+            # Re-raise the issue so it is not lost.
+            raise
 
     async def __aexit__(self, exc_type, exc_value, exc_tb):
+        await self.disconnect()
+
+    async def disconnect(self):
         """ Close an open connection to the projector. """
+        await self._close_socket()
+        self._initialized = False
+
+    async def _close_socket(self):
+        """ Internal helper to safely close the streams without changing initialization state. """
         try:
-            self._writer.close()
+            if self._writer is not None:
+                self._writer.close()
+                try:
+                    await self._writer.wait_closed()
+                except Exception:
+                    pass
         finally:
             self._reader = None
             self._writer = None
@@ -207,6 +240,8 @@ class PJLink:
             raw = await asyncio.wait_for(self._reader.readuntil(b'\r'), self._timeout)
         except asyncio.IncompleteReadError as err:
             raise PJLinkConnectionClosed('projector closed the connection') from err
+        except asyncio.exceptions.TimeoutError as err:
+            raise PJLinkNoConnection('projector did not respond in time') from err
         return raw.decode(self._encoding)
 
     async def transmit(self, command, param, pjclass: PJClass):
@@ -226,22 +261,46 @@ class PJLink:
         Returns:
             str: The response to the issued command.
         """
-        # Generate the command string.
-        cstring = self._format_command(command, param, pjclass)
+        # Only one command/reconnection at a time.
+        async with self._tx_lock:
+            try:
+                # Guard against lazy/unintended connections
+                if not self._initialized:
+                    raise PJLinkNoConnection(
+                        "You must explicitly connect() or use the async context manager before transmitting."
+                        )
 
-        # Send the command string.
-        cbytes = bytearray(cstring, self._encoding)
-        if PRINT_DEBUG_COMMS:
-            print("🚢", cbytes)
-        self._writer.write(cbytes)
-        await self._writer.drain()
+                # Try to reconnect if the socket dropped.
+                if not self.is_connected:
+                    await self.connect()
 
-        # Get the response.
-        response = await self._read_next()
+                # Generate the command string.
+                cstring = self._format_command(command, param, pjclass)
 
-        # Parse the response.
-        _, param = PJLink._parse_response(response, expect_command=command, expect_pjclass=pjclass)
-        return param
+                # Send the command string.
+                cbytes = bytearray(cstring, self._encoding)
+                if PRINT_DEBUG_COMMS:
+                    print("🚢", cbytes)
+                self._writer.write(cbytes)
+                await self._writer.drain()
+
+                # Get the response.
+                response = await self._read_next()
+
+                # Parse the response.
+                _, param = PJLink._parse_response(response, expect_command=command, expect_pjclass=pjclass)
+                return param
+
+            except Exception:
+                await self._close_socket()
+                raise
+
+    @property
+    def is_connected(self):
+        """ True if the connection is active and not in a closing state. """
+        writer_created = self._writer is not None
+        writer_active = writer_created and not self._writer.is_closing()
+        return writer_active
 
     @staticmethod
     def _format_command(command, param, pjclass: PJClass):
